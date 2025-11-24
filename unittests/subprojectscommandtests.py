@@ -298,3 +298,50 @@ class SubprojectsCommandTests(BasePlatformTests):
         self.assertFalse(Path(self.subprojects_dir / 'sub_file').exists())
         self.assertFalse(Path(self.subprojects_dir / 'sub_git').exists())
         self.assertFalse(Path(self.subprojects_dir / 'redirect.wrap').exists())
+
+    def test_lock_file(self):
+        """Test lock file generation and instantiate command."""
+        subp_name = 'sub_lock'
+
+        # Create a fake remote git repository and a wrap file
+        self._git_create_remote_repo(subp_name)
+        self._wrap_create_git(subp_name)
+        self._subprojects_cmd(['download'])
+        self.assertPathExists(str(self.subprojects_dir / subp_name))
+
+        # Generate lock file
+        self._subprojects_cmd(['lock'])
+        lock_file = self.subprojects_dir / 'meson.lock'
+        self.assertPathExists(str(lock_file))
+
+        # Check lock file contents
+        with open(str(lock_file), 'r', encoding='utf-8') as f:
+            content = f.read()
+            self.assertIn('version = 1', content)
+            self.assertIn(f'name = "{subp_name}"', content)
+            self.assertIn('type = "git"', content)
+            self.assertIn('commit =', content)
+
+        # Get the locked commit
+        locked_commit = None
+        for line in content.split('\n'):
+            if line.startswith('commit ='):
+                locked_commit = line.split('=')[1].strip().strip('"')
+                break
+        self.assertIsNotNone(locked_commit)
+
+        # Create a new commit in remote
+        self._git_remote(['commit', '--no-gpg-sign', '--allow-empty', '-m', 'new commit'], subp_name)
+        new_remote_commit = self._git_remote_commit(subp_name)
+        self.assertNotEqual(locked_commit, new_remote_commit)
+
+        # Update the local subproject to the new commit
+        self._git_config(self.subprojects_dir / subp_name)
+        self._subprojects_cmd(['update', '--reset'])
+        current_commit = self._git_local_commit(subp_name)
+        self.assertEqual(current_commit, new_remote_commit)
+
+        # Use instantiate to go back to locked commit
+        self._subprojects_cmd(['instantiate'])
+        current_commit = self._git_local_commit(subp_name)
+        self.assertEqual(current_commit, locked_commit)

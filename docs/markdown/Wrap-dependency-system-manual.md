@@ -379,6 +379,81 @@ Wraps provide a convenient way of obtaining a project into your
 subproject directory. Then you use it as a regular subproject (see
 [subprojects](Subprojects.md)).
 
+## Lock file for reproducible builds
+
+Meson supports lock files for subprojects to ensure reproducible builds without
+having to pin the version of each subproject in the wrap file. This feature is
+similar to Rust's `cargo.lock` or Nix's `flake.lock`.
+
+### Overview
+
+The lock file feature provides the best of both worlds:
+- **Reproducibility**: The exact version (commit hash) of each subproject is recorded
+- **Flexibility**: No dependency hell from incompatible version pins
+
+### Lock file location
+
+The lock file is stored at `subprojects/meson.lock` in TOML format.
+
+### Lock file format
+
+```toml
+version = 1
+
+[[subproject]]
+name = "my-subproject"
+type = "git"
+directory = "my-subproject"
+url = "https://github.com/user/my-subproject"
+revision = "main"
+commit = "7e60d1430d3a69478ad0abcf19238d2df97c507009a52b3c10addcd7f6bcb916"
+```
+
+### Commands
+
+#### Creating a lock file
+
+Use `meson subprojects lock` to generate a lock file from the current state of
+downloaded subprojects:
+
+```sh
+meson subprojects lock
+```
+
+This will create `subprojects/meson.lock` containing the resolved commit hashes
+for all git subprojects currently downloaded in your project.
+
+#### Instantiating from lock file
+
+Use `meson subprojects instantiate` to check out subprojects at the versions
+specified in the lock file:
+
+```sh
+meson subprojects instantiate
+```
+
+This is useful when the lock file and local subprojects get out of sync, for
+example after pulling changes from version control.
+
+#### Automatic lock file updates
+
+When a lock file exists, `meson subprojects update` will automatically update it
+after updating subprojects:
+
+```sh
+meson subprojects update
+```
+
+### Behavior
+
+- **Opt-in feature**: If there is no `meson.lock` file, nothing changes
+- **Git only**: Currently, the lock file primarily benefits git subprojects by
+  recording exact commit hashes
+- **Main project only**: Lock files in subprojects themselves are ignored; only
+  the main project's lock file is used
+- **Automatic usage**: When subprojects are cloned and a lock file exists, Meson
+  will automatically check out the locked commit
+
 ## Getting wraps
 
 Usually you don't want to write your wraps by hand.
