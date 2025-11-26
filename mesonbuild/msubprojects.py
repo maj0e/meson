@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, InitVar
-import sys, os, subprocess
+import sys
+import os
+import subprocess
 import argparse
 import asyncio
 import fnmatch
@@ -19,6 +21,7 @@ from .ast import IntrospectionInterpreter
 from .mesonlib import quiet_git, GitException, Popen_safe, MesonException, windows_proof_rmtree
 from .wrap.wrap import (Resolver, WrapException, ALL_TYPES,
                         parse_patch_url, update_wrap_file, get_releases)
+from .wrap.lockfile import LockFile
 
 if T.TYPE_CHECKING:
     from typing_extensions import Protocol
@@ -633,6 +636,86 @@ class Runner:
                 shutil.copyfile(src_path, dst_path)
         return True
 
+    def gen_lock(self) -> bool:
+        """Generate lock file entry for this subproject."""
+        # This method is called from the lock command
+        # The actual lock file generation happens in run_lock function
+        if not os.path.isdir(self.repo_dir):
+            self.log(f'  -> {self.wrap.name} not downloaded yet, skipping')
+            return True
+        return True
+
+    def instantiate(self) -> bool:
+        """Checkout subproject at the version specified in lock file."""
+        self.log(f'Instantiating {self.wrap.name} from lock file...')
+
+        if self.wrap.type != 'git':
+            self.log('  -> Instantiate only works for git subprojects')
+            return True
+
+        # Get resolver's lock file
+        if not self.wrap_resolver.lockfile:
+            self.log('  -> No lock file found')
+            return True
+
+        locked = self.wrap_resolver.lockfile.get_subproject(self.wrap.name)
+        if not locked:
+            self.log(f'  -> {self.wrap.name} not found in lock file')
+            return True
+
+        if not locked.resolved_commit:
+            self.log(f'  -> No locked commit for {self.wrap.name}')
+            return True
+
+        if not os.path.isdir(self.repo_dir):
+            self.log('  -> Subproject not downloaded, use download command first')
+            return False
+
+        if not os.path.exists(os.path.join(self.repo_dir, '.git')):
+            self.log('  -> Not a git repository')
+            return False
+
+        try:
+            # Get current commit
+            current_commit = self.git_output(['rev-parse', 'HEAD']).strip()
+            if current_commit == locked.resolved_commit:
+                self.log(f'  -> Already at locked commit {locked.resolved_commit[:8]}')
+                return True
+
+            # Check if the locked commit exists locally
+            if self.wrap_resolver.is_git_full_commit_id(locked.resolved_commit) and \
+                    quiet_git(['rev-parse', '--verify', locked.resolved_commit + '^{commit}'], self.repo_dir)[0]:
+                # The commit we need is available locally. Trick git into setting FETCH_HEAD.
+                self.git_output(['fetch', '.', locked.resolved_commit])
+            else:
+                # Fetch the locked commit from remote
+                url = locked.url
+                if not url:
+                    self.log('  ->', mlog.red('No URL found in lock file'))
+                    return False
+
+                try:
+                    self.log('  -> Fetching locked commit from remote...')
+                    # Fetch the specific commit from origin
+                    heads_refmap = '+refs/heads/*:refs/remotes/origin/*'
+                    tags_refmap = '+refs/tags/*:refs/tags/*'
+                    self.git_output(['fetch', '--refmap', heads_refmap, '--refmap', tags_refmap, 'origin', locked.resolved_commit])
+                except GitException as e:
+                    self.log('  -> Could not fetch locked commit', mlog.bold(locked.resolved_commit[:8]))
+                    self.log(mlog.red(e.output))
+                    self.log(mlog.red(str(e)))
+                    return False
+
+            # Checkout the locked commit
+            self.log(f'  -> Checking out locked commit {locked.resolved_commit[:8]}')
+            success = self.git_checkout(locked.resolved_commit)
+            if success:
+                self.git_show()
+            return success
+        except GitException as e:
+            self.log('  ->', mlog.red(f'Failed to instantiate: {e}'))
+            return False
+
 
 def add_common_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument('--sourcedir', default='.',
@@ -719,6 +802,52 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     p.add_argument('--save', action='store_true', default=False, help='Save packagefiles from the subproject')
     p.set_defaults(subprojects_func=Runner.packagefiles)
 
+    p = subparsers.add_parser('lock', help='Generate a lock file for subprojects')
+    add_common_arguments(p)
+    add_subprojects_argument(p)
+    p.set_defaults(subprojects_func=Runner.gen_lock)
+    p.set_defaults(post_func=run_lock_post)
+
+    p = subparsers.add_parser('instantiate', help='Checkout subprojects at versions specified in lock file')
+    add_common_arguments(p)
+    add_subprojects_argument(p)
+    p.set_defaults(subprojects_func=Runner.instantiate)
+
+def run_lock_post(options: 'Arguments') -> None:
+    """Post-processing for lock command: generate the actual lock file."""
+    source_dir = os.path.relpath(os.path.realpath(options.sourcedir))
+    with mlog.no_logging():
+        intr = IntrospectionInterpreter(source_dir, '', 'none')
+        intr.load_root_meson_file()
+        subproject_dir = intr.extract_subproject_dir() or 'subprojects'
+
+    subdir_root = os.path.join(source_dir, subproject_dir)
+    r = Resolver(source_dir, subproject_dir, wrap_frontend=True, allow_insecure=options.allow_insecure, silent=True)
+
+    # Create or update lock file
+    lockfile = LockFile()
+
+    for name, wrap in r.wraps.items():
+        if wrap.type is None:
+            continue
+
+        repo_dir = os.path.join(subdir_root, wrap.directory)
+
+        # Download subproject if not already present
+        if not os.path.isdir(repo_dir):
+            mlog.log(f'Fetching {name} for lock file...')
+            try:
+                r.resolve(name)
+            except WrapException as e:
+                mlog.warning(f'Failed to fetch {name}: {e}')
+                continue
+
+        # Add subproject to lock file
+        lockfile.add_subproject(wrap, subdir_root)
+
+    # Save lock file
+    lockfile.save(subdir_root)
+
 def run(options: 'Arguments') -> int:
     source_dir = os.path.relpath(os.path.realpath(options.sourcedir))
     if not os.path.isfile(os.path.join(source_dir, 'meson.build')):
@@ -763,6 +892,20 @@ def run(options: 'Arguments') -> int:
     post_func = getattr(options, 'post_func', None)
     if post_func:
         post_func(options)
+
+    # Update lock file after update command if lock file exists
+    if getattr(options, 'command', None) == 'update' and os.path.exists(os.path.join(source_dir, subproject_dir, 'meson.lock')):
+        mlog.log('Updating lock file...')
+        lockfile = r.lockfile or LockFile()
+        for name, success in zip(task_names, results):
+            if success:
+                wrap = r.wraps.get(name)
+                if wrap and wrap.type:
+                    repo_dir = os.path.join(source_dir, subproject_dir, wrap.directory)
+                    if os.path.isdir(repo_dir):
+                        lockfile.add_subproject(wrap, os.path.join(source_dir, subproject_dir))
+        lockfile.save(os.path.join(source_dir, subproject_dir))
+
     failures = [name for name, success in zip(task_names, results) if not success]
     if failures:
         m = 'Please check logs above as command failed in some subprojects which could have been left in conflict state: '

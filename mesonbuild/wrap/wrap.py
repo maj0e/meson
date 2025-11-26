@@ -37,6 +37,7 @@ from ..mesonlib import (
 from ..interpreterbase import FeatureNew
 from ..interpreterbase import SubProject
 from .. import mesonlib
+from .lockfile import LockFile
 
 if T.TYPE_CHECKING:
     import http.client
@@ -59,7 +60,7 @@ ALL_TYPES = ['file', 'git', 'hg', 'svn', 'redirect']
 
 if sys.version_info >= (3, 14):
     import tarfile
-    tarfile.TarFile.extraction_filter = tarfile.fully_trusted_filter
+    tarfile.TarFile.extraction_filter = staticmethod(tarfile.fully_trusted_filter)
 
 if mesonlib.is_windows():
     from ..programs import ExternalProgram
@@ -382,9 +383,11 @@ class Resolver:
         self.wrapdb_provided_deps: T.Dict[str, str] = {}
         self.wrapdb_provided_programs: T.Dict[str, str] = {}
         self.loaded_dirs: T.Set[str] = set()
+        self.lockfile: T.Optional[LockFile] = None
         self.load_wraps()
         self.load_netrc()
         self.load_wrapdb()
+        self.load_lockfile()
 
     def load_netrc(self) -> None:
         try:
@@ -442,6 +445,15 @@ class Resolver:
         for name, info in self.wrapdb.items():
             self.wrapdb_provided_deps.update({i: name for i in info.get('dependency_names', [])})
             self.wrapdb_provided_programs.update({i: name for i in info.get('program_names', [])})
+
+    def load_lockfile(self) -> None:
+        """Load the lock file if it exists."""
+        try:
+            self.lockfile = LockFile.load(self.subdir_root)
+        except Exception as e:
+            if not self.silent:
+                mlog.warning(f'Failed to load lock file: {e}')
+            self.lockfile = None
 
     def get_from_wrapdb(self, subp_name: str) -> T.Optional[PackageDefinition]:
         info = self.wrapdb.get(subp_name)
@@ -678,6 +690,15 @@ class Resolver:
         if not GIT:
             raise WrapException(f'Git program not found, cannot download {packagename}.wrap via git.')
         revno = self.wrap.get('revision')
+
+        # Check if lock file specifies a specific commit to use
+        if self.lockfile:
+            locked = self.lockfile.get_subproject(packagename)
+            if locked and locked.resolved_commit:
+                revno = locked.resolved_commit
+                if not self.silent:
+                    mlog.log(f'Using locked commit {revno[:8]} for {packagename}')
+
         checkout_cmd = ['-c', 'advice.detachedHead=false', 'checkout', revno, '--']
         is_shallow = False
         depth_option: T.List[str] = []
