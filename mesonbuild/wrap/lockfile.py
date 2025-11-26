@@ -251,9 +251,10 @@ class LockFile:
                 continue
 
             if line == '[[subproject]]':
-                if current_subproject is not None and 'name' in current_subproject:
-                    name = current_subproject['name']
-                    subprojects[name] = LockedSubproject.from_dict(name, current_subproject)
+                if current_subproject is not None:
+                    if 'name' in current_subproject:
+                        name = current_subproject['name']
+                        subprojects[name] = LockedSubproject.from_dict(name, current_subproject)
                 current_subproject = {}
             elif '=' in line:
                 if current_subproject is not None:

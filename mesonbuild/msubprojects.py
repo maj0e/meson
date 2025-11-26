@@ -894,7 +894,7 @@ def run(options: 'Arguments') -> int:
         post_func(options)
 
     # Update lock file after update command if lock file exists
-    if options.subprojects_func == Runner.update and os.path.exists(os.path.join(source_dir, subproject_dir, 'meson.lock')):
+    if getattr(options, 'command', None) == 'update' and os.path.exists(os.path.join(source_dir, subproject_dir, 'meson.lock')):
         mlog.log('Updating lock file...')
         lockfile = r.lockfile or LockFile()
         for name, success in zip(task_names, results):
