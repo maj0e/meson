@@ -829,10 +829,16 @@ def run_lock_post(options: 'Arguments') -> None:
         if wrap.type is None:
             continue
 
-        # Skip subprojects that are not downloaded
         repo_dir = os.path.join(subdir_root, wrap.directory)
+
+        # Download subproject if not already present
         if not os.path.isdir(repo_dir):
-            continue
+            mlog.log(f'Fetching {name} for lock file...')
+            try:
+                r.resolve(name)
+            except WrapException as e:
+                mlog.warning(f'Failed to fetch {name}: {e}')
+                continue
 
         # Add subproject to lock file
         lockfile.add_subproject(wrap, subdir_root)
