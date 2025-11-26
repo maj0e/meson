@@ -1,0 +1,9 @@
+version = 1
+
+[[subproject]]
+name = "samplesubproject"
+type = "git"
+directory = "samplesubproject"
+url = "https://github.com/jpakkane/samplesubproject.git"
+revision = "head"
+commit = "5d8e7d7c103ae56bdad482a06505e5aaf13abce2"
