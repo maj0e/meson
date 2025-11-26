@@ -680,11 +680,36 @@ class Runner:
                 self.log(f'  -> Already at locked commit {locked.resolved_commit[:8]}')
                 return True
 
+            # Check if the locked commit exists locally
+            if self.wrap_resolver.is_git_full_commit_id(locked.resolved_commit) and \
+                    quiet_git(['rev-parse', '--verify', locked.resolved_commit + '^{commit}'], self.repo_dir)[0]:
+                # The commit we need is available locally. Trick git into setting FETCH_HEAD.
+                self.git_output(['fetch', '.', locked.resolved_commit])
+            else:
+                # Fetch the locked commit from remote
+                url = locked.url
+                if not url:
+                    self.log('  ->', mlog.red('No URL found in lock file'))
+                    return False
+
+                try:
+                    self.log(f'  -> Fetching locked commit from remote...')
+                    # Fetch the specific commit from origin
+                    heads_refmap = '+refs/heads/*:refs/remotes/origin/*'
+                    tags_refmap = '+refs/tags/*:refs/tags/*'
+                    self.git_output(['fetch', '--refmap', heads_refmap, '--refmap', tags_refmap, 'origin', locked.resolved_commit])
+                except GitException as e:
+                    self.log('  -> Could not fetch locked commit', mlog.bold(locked.resolved_commit[:8]))
+                    self.log(mlog.red(e.output))
+                    self.log(mlog.red(str(e)))
+                    return False
+
             # Checkout the locked commit
             self.log(f'  -> Checking out locked commit {locked.resolved_commit[:8]}')
-            self.git_checkout(locked.resolved_commit)
-            self.git_show()
-            return True
+            success = self.git_checkout(locked.resolved_commit)
+            if success:
+                self.git_show()
+            return success
         except GitException as e:
             self.log('  ->', mlog.red(f'Failed to instantiate: {e}'))
             return False
