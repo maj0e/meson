@@ -238,6 +238,7 @@
       "mesonbuild.utils.universal",
       "mesonbuild.utils.vsenv",
       "mesonbuild.wrap",
+      "mesonbuild.wrap.lockfile",
       "mesonbuild.wrap.wrap"
     ],
     "count": 71
