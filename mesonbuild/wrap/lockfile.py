@@ -251,15 +251,16 @@ class LockFile:
                 continue
 
             if line == '[[subproject]]':
-                if current_subproject and 'name' in current_subproject:
+                if current_subproject is not None and 'name' in current_subproject:
                     name = current_subproject['name']
                     subprojects[name] = LockedSubproject.from_dict(name, current_subproject)
                 current_subproject = {}
-            elif '=' in line and current_subproject is not None:
-                key, value = line.split('=', 1)
-                key = key.strip()
-                value = value.strip().strip('"')
-                current_subproject[key] = value
+            elif '=' in line:
+                if current_subproject is not None:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip().strip('"')
+                    current_subproject[key] = value
             elif line.startswith('version ='):
                 version = int(line.split('=', 1)[1].strip())
 

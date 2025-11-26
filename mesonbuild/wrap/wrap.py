@@ -37,7 +37,7 @@ from ..mesonlib import (
 from ..interpreterbase import FeatureNew
 from ..interpreterbase import SubProject
 from .. import mesonlib
-from .lockfile import LockFile, LockedSubproject
+from .lockfile import LockFile
 
 if T.TYPE_CHECKING:
     import http.client
