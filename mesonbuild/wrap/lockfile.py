@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 import typing as T
-from pathlib import Path
 from dataclasses import dataclass, field
 
 from .. import mlog
@@ -283,7 +282,7 @@ class LockFile:
                 content = f.read()
             return LockFile.from_toml_string(content)
         except Exception as e:
-            raise LockFileException(f'Failed to load lock file: {e}')
+            raise LockFileException(f'Failed to load lock file: {e}') from e
 
     def save(self, subprojects_dir: str) -> None:
         """Save lock file to subprojects directory."""
