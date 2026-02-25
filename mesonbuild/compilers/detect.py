@@ -73,6 +73,7 @@ defaults['rust'] = ['rustc']
 defaults['swift'] = ['swiftc']
 defaults['vala'] = ['valac']
 defaults['cython'] = ['cython', 'cython3'] # Official name is cython, but Debian renamed it to cython3.
+defaults['julia'] = ['julia']
 defaults['static_linker'] = ['ar', 'gar']
 defaults['strip'] = ['strip']
 defaults['vs_static_linker'] = ['lib']
@@ -102,6 +103,7 @@ def compiler_from_language(env: 'Environment', lang: str, for_machine: MachineCh
         'nasm': detect_nasm_compiler,
         'masm': detect_masm_compiler,
         'linearasm': detect_linearasm_compiler,
+        'julia': detect_julia_compiler,
     }
     return lang_map[lang](env, for_machine) if lang in lang_map else None
 
@@ -1417,6 +1419,22 @@ def detect_masm_compiler(env: 'Environment', for_machine: MachineChoice) -> Comp
         popen_exceptions[' '.join(comp + [arg])] = e
     _handle_exceptions(popen_exceptions, [comp])
     raise EnvironmentException('Unreachable code (exception to make mypy happy)')
+
+def detect_julia_compiler(env: 'Environment', for_machine: MachineChoice) -> Compiler:
+    from . import julia
+    is_cross = env.is_cross_build(for_machine)
+    info = env.machines[for_machine]
+    compilers, ccache = _get_compilers(env, 'julia', for_machine)
+    popen_exceptions = {}
+    for compiler in compilers:
+        try:
+            p, out, err = Popen_safe_logged(compiler + ['--version'], msg='Detecting compiler via')
+        except OSError as e:
+            popen_exceptions[join_args(compiler + ['--version'])] = e
+            continue
+        version = search_version(out)
+        return julia.JuliaCompiler(compiler, version, for_machine, is_cross, info)
+    _handle_exceptions(popen_exceptions, compilers)
 
 def detect_linearasm_compiler(env: Environment, for_machine: MachineChoice) -> Compiler:
     from .asm import TILinearAsmCompiler
